@@ -1,0 +1,13 @@
+{
+  "name": "Kaali ki Teeri",
+  "short_name": "Kaali Teeri",
+  "description": "Play Kaali ki Teeri (3 of Spades) online with 4–10 friends.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#10152e",
+  "theme_color": "#10152e",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#10152e">
+  <meta name="description" content="Play Kaali ki Teeri (3 of Spades) online with 4–10 friends. Bid, pick trump, call your secret partners.">
+  <title>Kaali ki Teeri</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icon.svg">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Mukta:wght@400;500;600;700;800&family=Rozha+One&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <!-- HOME -->
+  <section id="home" class="screen">
+    <div class="home-inner">
+      <div class="hero" aria-hidden="true">
+        <div class="hero-fan">
+          <div class="card red s-H fan-l"><span class="idx tl"><b>A</b><i>♥</i></span><span class="pip">♥</span><span class="idx br"><b>A</b><i>♥</i></span></div>
+          <div class="card teeri fan-c"><span class="idx tl"><b>3</b><i>♠</i></span><span class="pips3"><i>♠</i><i>♠</i><i>♠</i></span><span class="idx br"><b>3</b><i>♠</i></span></div>
+          <div class="card s-C fan-r"><span class="idx tl"><b>K</b><i>♣</i></span><span class="face">K</span><span class="idx br"><b>K</b><i>♣</i></span></div>
+        </div>
+      </div>
+      <h1 class="title">Kaali ki Teeri</h1>
+      <p class="lede">Bid high, pick the trump, call your secret partners. The 3 of Spades alone is worth 30.</p>
+      <form id="home-form" class="home-form" autocomplete="off" onsubmit="return false">
+        <label for="name-input">Your name</label>
+        <input id="name-input" maxlength="16" autocomplete="nickname" placeholder="What should friends call you?" enterkeyhint="go">
+        <button type="button" id="create-btn" class="btn primary wide">Create a room</button>
+        <div class="divider"><span>or join friends</span></div>
+        <div class="join-row">
+          <input id="code-input" maxlength="4" placeholder="Room code" autocapitalize="characters" spellcheck="false" enterkeyhint="go" aria-label="Room code">
+          <button type="button" id="join-btn" class="btn">Join</button>
+        </div>
+        <p id="home-error" class="form-error" role="alert"></p>
+      </form>
+      <button type="button" class="link-btn" data-open="rules">How to play</button>
+    </div>
+  </section>
+
+  <!-- LOBBY -->
+  <section id="lobby" class="screen hidden">
+    <header class="bar">
+      <button type="button" class="icon-btn" data-act="leave-confirm" aria-label="Leave room">
+        <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+      </button>
+      <div class="bar-title">Room <strong id="lobby-code"></strong></div>
+      <button type="button" class="icon-btn" data-open="rules" aria-label="How to play">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5V14"/><circle cx="12" cy="17.2" r=".6" class="fill"/></svg>
+      </button>
+    </header>
+    <div class="lobby-body">
+      <div class="invite">
+        <p class="muted">Share the code or send the link</p>
+        <div class="code-big" id="code-big" aria-live="polite"></div>
+        <div class="invite-actions">
+          <button type="button" class="btn small" data-act="copy-link">Copy link</button>
+          <a class="btn small wa" id="wa-link" target="_blank" rel="noopener">WhatsApp</a>
+          <button type="button" class="btn small" data-act="native-share" id="native-share" hidden>Share</button>
+        </div>
+      </div>
+      <div class="lobby-cols">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Players</h2>
+            <span class="count" id="player-count"></span>
+          </div>
+          <ol id="lobby-players" class="plist"></ol>
+          <div class="host-tools" id="host-seat-tools">
+            <button type="button" class="btn small" data-act="add-bot">Add a bot</button>
+            <button type="button" class="btn small ghost" data-act="shuffle-seats">Shuffle seats</button>
+          </div>
+          <div id="spectator-box" class="spectators"></div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>Table rules</h2></div>
+          <div class="settings" id="settings">
+            <label>Opening bid (minimum)
+              <select data-key="minBid">
+                <option>100</option><option>110</option><option>120</option><option>125</option><option>130</option>
+                <option>140</option><option>150</option><option>160</option><option>175</option><option>200</option>
+              </select>
+            </label>
+            <label>Raise bids by
+              <select data-key="bidStep"><option value="5">5</option><option value="10">10</option></select>
+            </label>
+            <label>Partner cards called
+              <select data-key="partnerCount">
+                <option value="auto">Auto</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
+              </select>
+            </label>
+            <label>Bidder wins or loses
+              <select data-key="bidderMultiplier"><option value="2">Double the bid</option><option value="1">The bid</option></select>
+            </label>
+            <label>Partners lose on a failed bid
+              <select data-key="partnersLoseOnFail"><option value="true">Yes</option><option value="false">No</option></select>
+            </label>
+            <label>Rounds
+              <select data-key="rounds">
+                <option value="auto">One deal each</option><option value="3">3</option><option value="5">5</option><option value="8">8</option>
+                <option value="10">10</option><option value="12">12</option><option value="15">15</option><option value="20">20</option><option value="0">Keep playing</option>
+              </select>
+            </label>
+            <label>Turn timer
+              <select data-key="turnTimer">
+                <option value="0">Off</option><option value="20">20 seconds</option><option value="30">30 seconds</option>
+                <option value="45">45 seconds</option><option value="60">60 seconds</option><option value="90">90 seconds</option>
+              </select>
+            </label>
+            <label>End round once result is certain
+              <select data-key="earlyFinish"><option value="false">No, play every card</option><option value="true">Yes</option></select>
+            </label>
+          </div>
+          <p class="muted small" id="settings-note"></p>
+        </section>
+      </div>
+    </div>
+    <footer class="lobby-foot">
+      <p id="start-hint" class="muted"></p>
+      <button type="button" id="start-btn" class="btn primary wide" data-act="start">Deal the cards</button>
+    </footer>
+  </section>
+
+  <!-- GAME -->
+  <section id="game" class="screen hidden">
+    <header id="topbar">
+      <div class="tb-row">
+        <button type="button" class="icon-btn" data-open="menu" aria-label="Menu">
+          <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+        <div class="tb-round">
+          <span id="tb-round"></span>
+          <span class="tb-code" id="tb-code"></span>
+        </div>
+        <div class="tb-info" id="tb-info"></div>
+        <div class="tb-actions">
+          <button type="button" class="icon-btn" data-open="lastTrick" aria-label="Last trick" title="Last trick">
+            <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.7"/><path d="M4 4v4h4"/><path d="M12 8v4l3 2"/></svg>
+          </button>
+          <button type="button" class="icon-btn" data-open="scores" aria-label="Scores" title="Scores">
+            <svg viewBox="0 0 24 24"><path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8.5 20h7"/></svg>
+          </button>
+          <button type="button" class="icon-btn chat-toggle" data-act="toggle-side" aria-label="Chat" title="Chat">
+            <svg viewBox="0 0 24 24"><path d="M5 5h14v10H10l-4 4v-4H5z"/></svg>
+            <span class="badge" id="chat-badge" hidden></span>
+          </button>
+        </div>
+      </div>
+      <div class="tb-info tb-info-mobile" id="tb-info-m"></div>
+    </header>
+
+    <main id="game-main">
+      <div id="table-wrap">
+        <div id="table">
+          <div class="felt"></div>
+          <div id="center"></div>
+          <div id="trick"></div>
+          <div id="seats"></div>
+          <div id="floats"></div>
+        </div>
+      </div>
+      <div id="dock">
+        <div id="action"></div>
+        <div id="hand" aria-label="Your cards"></div>
+      </div>
+    </main>
+
+    <aside id="side" aria-label="Chat and game log">
+      <div class="side-head">
+        <div class="tabs" role="tablist">
+          <button type="button" class="tab active" data-tab="chat" role="tab">Chat</button>
+          <button type="button" class="tab" data-tab="log" role="tab">Game log</button>
+        </div>
+        <button type="button" class="icon-btn side-close" data-act="toggle-side" aria-label="Close chat">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="pane" id="chat-pane">
+        <ul id="chat-list" class="chat-list"></ul>
+        <div class="reactions" id="reactions"></div>
+        <div class="phrases" id="phrases"></div>
+        <form id="chat-form" class="chat-form" autocomplete="off">
+          <input id="chat-input" maxlength="200" placeholder="Say something to the table" enterkeyhint="send" aria-label="Chat message">
+          <button class="btn small primary" type="submit">Send</button>
+        </form>
+      </div>
+      <div class="pane hidden" id="log-pane">
+        <ul id="log-list" class="log-list"></ul>
+      </div>
+    </aside>
+  </section>
+
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-card" id="modal-card"></div>
+  </div>
+  <div id="toasts" aria-live="polite"></div>
+  <div id="conn" class="conn hidden" role="status">Connection lost. Reconnecting…</div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
