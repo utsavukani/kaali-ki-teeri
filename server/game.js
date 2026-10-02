@@ -4,41 +4,165 @@
  *
  * Card ids look like "AS" (Ace of Spades), "10H", "3S" (the Kaali ki Teeri).
  * Suits: S = Hukum (spades), H = Paan (hearts), C = Chidi (clubs), D = Eent (diamonds).
+ *
+ * Multi-deck support:
+ *   ≤5 players  → 1 deck
+ *   6–7 players → 2 decks
+ *   8–10 players → 3 decks
+ *
+ * Removal order (to make total cards divisible by numPlayers):
+ *   Remove 0-point cards in rank order 2, 4, 6, 8 within each suit,
+ *   suit order: Diamond (D) → Chidi/Club (C) → Heart (H) → Kaali/Spade (S).
+ *   3S (Kaali ki Teeri) is NEVER removed.
+ *
+ * When multiple decks are used, duplicate cards get a "#2" / "#3" suffix
+ * (e.g. "AS#2") so every card id is unique, allowing normal Set/Array logic.
  */
 const crypto = require('crypto');
 
 const SUITS = ['S', 'H', 'C', 'D'];
 const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
 const RANK_VALUE = Object.fromEntries(RANKS.map((r, i) => [r, i + 2]));
-// Zero-point cards removed so the deck divides evenly (never touches 3S or any point card).
-const REMOVAL_ORDER = ['2C', '2D', '2H', '2S', '3C', '3D', '3H', '4C', '4D', '4H', '4S'];
+
+/**
+ * Removal candidates in priority order: zero-point ranks (2,4,6,7)
+ * in suit order D→C→H→S per rank tier.  3S is never in this list.
+ * Order: ALL 2s exhausted first, then ALL 4s, then ALL 6s, then ALL 7s.
+ */
+const REMOVABLE_RANKS = ['2', '4', '6', '7'];
+const REMOVAL_SUIT_ORDER = ['D', 'C', 'H', 'S'];
+
+function buildRemovalOrder() {
+  const order = [];
+  for (const rank of REMOVABLE_RANKS) {
+    for (const suit of REMOVAL_SUIT_ORDER) {
+      const card = rank + suit;
+      if (card !== '3S') order.push(card); // 3S can never be removed
+    }
+  }
+  return order; // 16 removable cards per deck
+}
+const REMOVAL_ORDER_PER_DECK = buildRemovalOrder();
+
 const TOTAL_POINTS = 250;
 const MIN_PLAYERS = 4;
 const MAX_PLAYERS = 10;
 
 class GameError extends Error {}
 
-const suitOf = (c) => c.slice(-1);
-const rankOf = (c) => c.slice(0, -1);
+/**
+ * Strip the deck-suffix (#2, #3) to get the real card id.
+ * e.g. "AS#2" → "AS", "3S" → "3S"
+ */
+const baseCard = (c) => c.replace(/#\d+$/, '');
+const suitOf = (c) => baseCard(c).slice(-1);
+const rankOf = (c) => baseCard(c).slice(0, -1);
 const rankValue = (c) => RANK_VALUE[rankOf(c)];
 
 function pointsOf(c) {
-  if (c === '3S') return 30;
+  if (baseCard(c) === '3S') return 30;
   const r = rankOf(c);
   if (r === 'A' || r === 'K' || r === 'Q' || r === 'J' || r === '10') return 10;
   if (r === '5') return 5;
   return 0;
 }
 
-function buildDeck(numPlayers) {
-  const removeCount = 52 % numPlayers;
-  const removed = REMOVAL_ORDER.slice(0, removeCount);
-  const deck = [];
-  for (const s of SUITS) for (const r of RANKS) {
-    const id = r + s;
-    if (!removed.includes(id)) deck.push(id);
+/**
+ * Returns deck configuration for a given player count.
+ *
+ * @param {number} n - player count
+ * @param {number} [preferredCpp] - preferred cardsPerPlayer (only honoured for n=9)
+ * @returns {{ numDecks, cardsPerPlayer, teamOptions, cppOptions }}
+ *
+ * Table:
+ *   n ≤5 → 1 deck,  floor(52/n) cards
+ *   n=6  → 2 decks, 15 cards, [3,3]
+ *   n=7  → 2 decks, 13 cards, [3,4] or [4,3]  (15 is mathematically impossible)
+ *   n=8  → 3 decks, 15 cards, [4,4]
+ *   n=9  → 3 decks, 13 OR 15 cards, [4,5] or [5,4]
+ *   n=10 → 3 decks, 13 cards, [5,5]
+ */
+function getDeckConfig(n, preferredCpp) {
+  if (n <= 5) {
+    return { numDecks: 1, cardsPerPlayer: Math.floor(52 / n), teamOptions: null, cppOptions: null };
   }
-  return { deck, removed };
+  switch (n) {
+    case 6:  return { numDecks: 2, cardsPerPlayer: 15, teamOptions: [[3, 3]], cppOptions: null };
+    case 7:  return { numDecks: 2, cardsPerPlayer: 13, teamOptions: [[3, 4], [4, 3]], cppOptions: null };
+    case 8:  return { numDecks: 3, cardsPerPlayer: 15, teamOptions: [[4, 4]], cppOptions: null };
+    case 9: {
+      const valid = [13, 15];
+      const cpp = valid.includes(preferredCpp) ? preferredCpp : 15;
+      return { numDecks: 3, cardsPerPlayer: cpp, teamOptions: [[4, 5], [5, 4]], cppOptions: valid };
+    }
+    case 10: return { numDecks: 3, cardsPerPlayer: 13, teamOptions: [[5, 5]], cppOptions: null };
+    default: return { numDecks: 1, cardsPerPlayer: Math.floor(52 / n), teamOptions: null, cppOptions: null };
+  }
+}
+
+/**
+ * Builds a shuffleable multi-deck array of unique card ids.
+ * Duplicates across decks get a suffix: "AS", "AS#2", "AS#3".
+ * Cards are removed in the defined order (D→C→H→S, even ranks first)
+ * until the total is exactly numPlayers × cardsPerPlayer.
+ *
+ * @param {number} numPlayers
+ * @param {number} [cardsPerPlayer] - if omitted, uses getDeckConfig
+ * @returns {{ deck: string[], removed: string[], numDecks: number }}
+ */
+function buildDeck(numPlayers, cardsPerPlayer) {
+  const config = getDeckConfig(numPlayers);
+  const nDecks = config.numDecks;
+  const cpp = cardsPerPlayer || config.cardsPerPlayer;
+  const totalNeeded = numPlayers * cpp;
+
+  // Build all card ids across all decks (unique via suffix)
+  const allCards = [];
+  const deckCount = {}; // base card → how many times seen so far
+  for (let d = 0; d < nDecks; d++) {
+    for (const s of SUITS) {
+      for (const r of RANKS) {
+        const base = r + s;
+        deckCount[base] = (deckCount[base] || 0) + 1;
+        const id = deckCount[base] === 1 ? base : base + '#' + deckCount[base];
+        allCards.push(id);
+      }
+    }
+  }
+
+  // Removal traversal: rank → deck → suit
+  // For each rank (2, 4, 6, 8):
+  //   Round 1 (deck 1): remove 1 card from each suit D→C→H→S
+  //   Round 2 (deck 2): remove 1 card from each suit D→C→H→S  (only if still needed)
+  //   Round 3 (deck 3): ...
+  //
+  // Example for 6 players, 2 decks, removing 14 cards:
+  //   Rank 2, deck1: 2D, 2C, 2H, 2S  (4 cards, 4 total)
+  //   Rank 2, deck2: 2D#2, 2C#2, 2H#2, 2S#2  (4 cards, 8 total)
+  //   Rank 4, deck1: 4D, 4C, 4H, 4S  (4 cards, 12 total)
+  //   Rank 4, deck2: 4D#2, 4C#2  (2 cards → 14 total → STOP)
+  //   Kept: 4H#2, 4S#2 (balanced — 1 copy of each stays)
+  const allCardsSet = new Set(allCards);
+  const removalList = [];
+  for (const rank of REMOVABLE_RANKS) {
+    for (let d = 1; d <= nDecks; d++) {
+      for (const suit of REMOVAL_SUIT_ORDER) {
+        const base = rank + suit;
+        if (base === '3S') continue; // 3S is never removed
+        const id = d === 1 ? base : base + '#' + d;
+        if (allCardsSet.has(id)) removalList.push(id);
+      }
+    }
+  }
+
+
+  const toRemove = allCards.length - totalNeeded;
+  if (toRemove < 0) throw new GameError(`Cannot deal ${cpp} cards to ${numPlayers} players with ${nDecks} deck(s)`);
+  const removed = removalList.slice(0, toRemove);
+  const removedSet = new Set(removed);
+  const deck = allCards.filter((c) => !removedSet.has(c));
+
+  return { deck, removed, numDecks: nDecks };
 }
 
 function shuffle(arr) {
@@ -66,7 +190,7 @@ function sortHand(hand, trump) {
 /** Does card a beat card b, given the led suit and trump? */
 function beats(a, b, led, trump) {
   const sa = suitOf(a), sb = suitOf(b);
-  if (sa === sb) return rankValue(a) > rankValue(b);
+  if (sa === sb) return rankValue(a) >= rankValue(b);
   if (sa === trump) return true;
   if (sb === trump) return false;
   return false; // a is off-suit and not trump
@@ -81,23 +205,62 @@ function trickWinner(plays, trump) {
   return best.playerId;
 }
 
+/**
+ * Returns the number of partners the bidder calls.
+ * For multi-deck games the bidding team size minus 1 (the bidder) = partner count.
+ * teamSplit is like '3v4' meaning bidTeam=3, defTeam=4.
+ */
 function autoPartnerCount(n) {
+  const cfg = getDeckConfig(n);
+  if (cfg.teamOptions && cfg.teamOptions.length > 0) {
+    // Use first option's bid-team size, minus 1 for the bidder
+    return cfg.teamOptions[0][0] - 1;
+  }
+  // 1-deck fallback
   if (n <= 5) return 1;
-  if (n <= 7) return 2;
-  if (n <= 9) return 3;
-  return 4;
+  return 1;
 }
 
-function resolvePartnerCount(setting, n) {
-  const k = setting === 'auto' ? autoPartnerCount(n) : Number(setting);
-  return Math.max(1, Math.min(k, n - 2));
+/**
+ * Given a teamSplit string like '3v4', returns { bidTeam, defTeam }.
+ * Falls back to the first option from getDeckConfig.
+ */
+function parseTeamSplit(teamSplit, n) {
+  const cfg = getDeckConfig(n);
+  if (teamSplit && typeof teamSplit === 'string') {
+    const parts = teamSplit.split('v').map(Number);
+    if (parts.length === 2 && parts[0] > 0 && parts[1] > 0 && parts[0] + parts[1] === n) {
+      return { bidTeam: parts[0], defTeam: parts[1] };
+    }
+  }
+  // fallback
+  if (cfg.teamOptions && cfg.teamOptions.length > 0) {
+    return { bidTeam: cfg.teamOptions[0][0], defTeam: cfg.teamOptions[0][1] };
+  }
+  return { bidTeam: Math.ceil(n / 2), defTeam: Math.floor(n / 2) };
+}
+
+function resolvePartnerCount(setting, n, teamSplit) {
+  if (setting !== 'auto') {
+    const k = Number(setting);
+    return Math.max(1, Math.min(k, n - 2));
+  }
+  // In multi-deck mode, derive from teamSplit
+  const cfg = getDeckConfig(n);
+  if (cfg.teamOptions && cfg.teamOptions.length > 0) {
+    const { bidTeam } = parseTeamSplit(teamSplit, n);
+    return Math.max(1, bidTeam - 1); // bidder + partners = bidTeam
+  }
+  return autoPartnerCount(n);
 }
 
 function defaultSettings() {
   return {
-    minBid: 125,
+    minBid: 'auto',  // 'auto' = half of total points (125 / 250 / 375 per deck count)
     bidStep: 5,
     partnerCount: 'auto',
+    teamSplit: 'auto',
+    cardsPerPlayer: 'auto',
     bidderMultiplier: 2,
     partnersLoseOnFail: true,
     rounds: 'auto',
@@ -107,9 +270,11 @@ function defaultSettings() {
 }
 
 const SETTING_RULES = {
-  minBid: (v) => [100, 110, 120, 125, 130, 140, 150, 160, 175, 200].includes(v),
+  minBid: (v) => v === 'auto' || (Number.isInteger(v) && v >= 100 && v <= 750 && v % 5 === 0),
   bidStep: (v) => [5, 10].includes(v),
   partnerCount: (v) => v === 'auto' || [1, 2, 3, 4].includes(v),
+  teamSplit: (v) => v === 'auto' || (typeof v === 'string' && /^\d+v\d+$/.test(v)),
+  cardsPerPlayer: (v) => v === 'auto' || [13, 15].includes(v),
   bidderMultiplier: (v) => [1, 2].includes(v),
   partnersLoseOnFail: (v) => typeof v === 'boolean',
   rounds: (v) => v === 'auto' || [0, 3, 5, 8, 10, 12, 15, 20].includes(v),
@@ -145,10 +310,21 @@ class Round {
     this.n = seats.length;
     this.dealerSeat = dealerSeat % this.n;
     this.settings = { ...settings };
-    this.partnerCount = resolvePartnerCount(settings.partnerCount, this.n);
 
-    const built = buildDeck(this.n);
+    // Resolve team split (for multi-deck games with odd-side options)
+    const preferredCpp = settings.cardsPerPlayer !== 'auto' ? Number(settings.cardsPerPlayer) : undefined;
+    const cfg = getDeckConfig(this.n, preferredCpp);
+    const ts = settings.teamSplit && settings.teamSplit !== 'auto' ? settings.teamSplit : null;
+    this.teamSplit = parseTeamSplit(ts, this.n);
+    this.numDecks = cfg.numDecks;
+    this.cardsPerPlayer = cfg.cardsPerPlayer;
+
+    this.partnerCount = resolvePartnerCount(settings.partnerCount, this.n, ts);
+
+    const built = buildDeck(this.n, this.cardsPerPlayer);
     this.removed = built.removed;
+    this.numDecksUsed = built.numDecks;
+    this.totalPoints = TOTAL_POINTS * this.numDecksUsed; // 250 / 500 / 750
     this.dealt = built.deck.slice();
     const cards = deck ? deck.slice() : shuffle(built.deck);
     this.handSize = cards.length / this.n;
@@ -173,6 +349,7 @@ class Round {
     this.lastTrick = null;
     this.trickNo = 0;
     this.result = null;
+    this.playedCounts = {};
   }
 
   seatOf(pid) { return this.seats.indexOf(pid); }
@@ -189,9 +366,14 @@ class Round {
   }
 
   // ---------- Bidding ----------
+  /** Resolve the configured minBid to an actual number (handles 'auto'). */
+  resolvedMinBid() {
+    return this.settings.minBid === 'auto' ? Math.ceil(this.totalPoints / 2) : this.settings.minBid;
+  }
+
   minNextBid() {
     const { high } = this.bidding;
-    return high ? high + this.settings.bidStep : this.settings.minBid;
+    return high ? high + this.settings.bidStep : this.resolvedMinBid();
   }
 
   canPass(pid) {
@@ -205,8 +387,8 @@ class Round {
     if (!Number.isInteger(amount)) throw new GameError('Bid must be a number');
     const min = this.minNextBid();
     if (amount < min) throw new GameError(`Bid at least ${min}`);
-    if (amount > TOTAL_POINTS) throw new GameError(`Maximum bid is ${TOTAL_POINTS}`);
-    if (amount % this.settings.bidStep !== 0) throw new GameError(`Bids go up in steps of ${this.settings.bidStep}`);
+    if (amount > this.totalPoints) throw new GameError(`Maximum bid is ${this.totalPoints}`);
+    if (amount % 5 !== 0) throw new GameError(`Bids must be a multiple of 5`);
     this.bidding.high = amount;
     this.bidding.bidderId = pid;
     this.bidding.history.push({ playerId: pid, action: 'bid', amount });
@@ -215,7 +397,7 @@ class Round {
 
   pass(pid) {
     this._assertTurn(pid, 'bidding');
-    if (!this.canPass(pid)) throw new GameError(`Everyone passed — you must open at ${this.settings.minBid}`);
+    if (!this.canPass(pid)) throw new GameError(`Everyone passed — you must open at ${this.resolvedMinBid()}`);
     this.bidding.passed.add(pid);
     this.bidding.history.push({ playerId: pid, action: 'pass' });
     this._advanceBidding();
@@ -223,7 +405,7 @@ class Round {
 
   _advanceBidding() {
     const b = this.bidding;
-    if (b.high >= TOTAL_POINTS) return this._endBidding();
+    if (b.high >= this.totalPoints) return this._endBidding();
     const active = this.seats.filter((p) => !b.passed.has(p));
     if (b.bidderId && active.length === 1 && active[0] === b.bidderId) return this._endBidding();
     let s = this.turnSeat;
@@ -257,17 +439,39 @@ class Round {
     if (uniq.length !== this.partnerCount) {
       throw new GameError(`Call exactly ${this.partnerCount} partner card${this.partnerCount > 1 ? 's' : ''}`);
     }
-    const allowed = new Set(this.callableCards(pid));
-    for (const c of uniq) {
-      if (!allowed.has(c)) throw new GameError("You can't call a card from your own hand");
+    // Parse cards like "AS_1", "3S_1"
+    const parsed = uniq.map(c => {
+      const parts = c.split('_');
+      return { base: parts[0] || c, ord: Number(parts[1]) || 1 };
+    });
+
+    const hand = this.hands[pid];
+    for (const p of parsed) {
+      const totalInPlay = this.dealt.filter(c => baseCard(c) === p.base).length;
+      const inHand = hand.filter(c => baseCard(c) === p.base).length;
+      const callableCount = totalInPlay - inHand;
+      const calledCount = parsed.filter(x => x.base === p.base).length;
+      if (calledCount > callableCount) {
+        throw new GameError(`You can't call more copies of ${p.base} than exist outside your hand`);
+      }
+      if (p.ord < 1 || p.ord > totalInPlay) {
+        throw new GameError(`Invalid ordinal ${p.ord} for ${p.base}`);
+      }
     }
+
     this.trump = trump;
-    this.called = uniq.map((card) => ({ card, holderId: this.holderOf(card), revealed: false, revealedAtTrick: null }));
-    this.team = new Set([pid, ...this.called.map((c) => c.holderId)]);
+    this.called = parsed.map(p => ({
+      baseCard: p.base,
+      targetOrdinal: p.ord,
+      holderId: null,
+      revealed: false,
+      revealedAtTrick: null
+    }));
+    this.team = new Set([pid]);
     this.phase = 'playing';
     this.trickNo = 1;
     this.trick = { leaderId: pid, plays: [] };
-    this.turnSeat = this.seatOf(pid); // bidder leads the first trick
+    this.turnSeat = this.seatOf(pid);
   }
 
   // ---------- Trick play ----------
@@ -290,11 +494,17 @@ class Round {
     this.trick.plays.push({ playerId: pid, card });
     const events = [{ type: 'card_played', playerId: pid, card, trickNo: this.trickNo }];
 
+    const base = baseCard(card);
+    this.playedCounts[base] = (this.playedCounts[base] || 0) + 1;
+    const thisOrdinal = this.playedCounts[base];
+
     for (const c of this.called) {
-      if (c.card === card && !c.revealed) {
+      if (c.baseCard === base && c.targetOrdinal === thisOrdinal && !c.revealed) {
+        c.holderId = pid;
         c.revealed = true;
         c.revealedAtTrick = this.trickNo;
-        events.push({ type: 'partner_revealed', playerId: pid, card, bidderId: this.bidding.bidderId });
+        this.team.add(pid);
+        events.push({ type: 'partner_revealed', playerId: pid, card, bidderId: this.bidding.bidderId, ordinal: thisOrdinal });
       }
     }
 
@@ -340,10 +550,44 @@ class Round {
     const teamPts = this.teamPoints();
     const collected = this.seats.reduce((s, p) => s + this.captured[p], 0);
     const defensePts = collected - teamPts;
-    return teamPts >= bid || defensePts > TOTAL_POINTS - bid;
+    
+    if (teamPts >= bid) return true;
+    
+    const allRevealed = this.called.every(c => c.revealed);
+    if (allRevealed && defensePts > this.totalPoints - bid) return true;
+    
+    return false;
   }
 
   _finish(early = false) {
+    // Resolve any hidden partners if game ended early
+    for (const c of this.called) {
+      if (!c.revealed) {
+        const base = c.baseCard;
+        const played = this.playedCounts[base] || 0;
+        const needed = c.targetOrdinal - played;
+        
+        if (needed > 0) {
+          const bidderSeat = this.seatOf(this.bidding.bidderId);
+          let foundCount = 0;
+          for (let i = 1; i <= this.n; i++) {
+            const pid = this.seats[(bidderSeat + i) % this.n];
+            const countInHand = this.hands[pid].filter(card => baseCard(card) === base).length;
+            for (let j = 0; j < countInHand; j++) {
+              foundCount++;
+              if (foundCount === needed) {
+                c.holderId = pid;
+                c.revealed = true;
+                this.team.add(pid);
+                break;
+              }
+            }
+            if (c.revealed) break;
+          }
+        }
+      }
+    }
+
     const bid = this.bidding.high;
     const bidderId = this.bidding.bidderId;
     const teamIds = this.seats.filter((p) => this.team.has(p));
@@ -357,12 +601,11 @@ class Round {
       else if (this.team.has(p)) d = success ? bid : (this.settings.partnersLoseOnFail ? -bid : 0);
       deltas[p] = d;
     }
-    for (const c of this.called) c.revealed = true;
     this.result = {
       bid,
       bidderId,
       trump: this.trump,
-      called: this.called.map((c) => ({ card: c.card, holderId: c.holderId })),
+      called: this.called.map((c) => ({ card: c.baseCard, ordinal: c.targetOrdinal, holderId: c.holderId })),
       teamIds,
       teamPoints,
       success,
@@ -378,6 +621,7 @@ class Round {
 module.exports = {
   SUITS, RANKS, TOTAL_POINTS, MIN_PLAYERS, MAX_PLAYERS,
   GameError, Round,
-  suitOf, rankOf, rankValue, pointsOf, beats, trickWinner, sortHand, suitOrder,
-  buildDeck, shuffle, autoPartnerCount, resolvePartnerCount, defaultSettings, sanitizeSettings,
+  baseCard, suitOf, rankOf, rankValue, pointsOf, beats, trickWinner, sortHand, suitOrder,
+  buildDeck, getDeckConfig, parseTeamSplit, shuffle,
+  autoPartnerCount, resolvePartnerCount, defaultSettings, sanitizeSettings,
 };

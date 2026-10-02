@@ -4,7 +4,8 @@
  * public information (bids, trump, called cards, revealed partners, the trick).
  * The same logic auto-plays for anyone whose turn timer runs out or who goes offline.
  */
-const { SUITS, suitOf, rankOf, rankValue, pointsOf, beats, trickWinner, buildDeck } = require('./game');
+const { SUITS, baseCard, suitOf, rankOf, rankValue, pointsOf, beats, trickWinner, buildDeck, getDeckConfig } = require('./game');
+
 
 const HONOUR = { A: 14, K: 9, Q: 5, J: 3 };
 
@@ -24,27 +25,30 @@ function handStrength(hand) {
 const baselineCache = new Map();
 function baselineStrength(n) {
   if (baselineCache.has(n)) return baselineCache.get(n);
-  const { deck } = buildDeck(n);
+  const cfg = getDeckConfig(n);
+  const { deck } = buildDeck(n, cfg.cardsPerPlayer);
   const total = deck.reduce((s, c) => s + cardStrength(c), 0);
-  const handSize = deck.length / n;
+  const handSize = cfg.cardsPerPlayer;
   const base = total / n + Math.max(0, handSize * 0.12) * 10; // typical long-suit bonus
   baselineCache.set(n, base);
   return base;
 }
 
 /** How high this hand is comfortable bidding. */
-function bidCeiling(hand, n) {
+function bidCeiling(hand, n, totalPoints = 250) {
   const diff = handStrength(hand) - baselineStrength(n);
-  const est = 118 + diff * 2.4 + (Math.random() * 16 - 8);
-  return Math.min(250, Math.round(est / 5) * 5);
+  const scale = totalPoints / 250;
+  const est = (118 + diff * 2.4 + (Math.random() * 16 - 8)) * scale;
+  return Math.min(totalPoints, Math.round(est / 5) * 5);
 }
 
 function botBid(round, pid) {
   const min = round.minNextBid();
-  if (!round.canPass(pid)) return { type: 'bid', amount: Math.min(250, min) };
-  if (min > 250) return { type: 'pass' };
+  const maxBid = round.totalPoints || 250;
+  if (!round.canPass(pid)) return { type: 'bid', amount: Math.min(maxBid, min) };
+  if (min > maxBid) return { type: 'pass' };
   if (!round._ceiling) round._ceiling = {};
-  if (round._ceiling[pid] === undefined) round._ceiling[pid] = bidCeiling(round.hands[pid], round.n);
+  if (round._ceiling[pid] === undefined) round._ceiling[pid] = bidCeiling(round.hands[pid], round.n, maxBid);
   return round._ceiling[pid] >= min ? { type: 'bid', amount: min } : { type: 'pass' };
 }
 
@@ -67,13 +71,38 @@ function botDeclare(round, pid) {
   priority.push('K' + trump, '3S');
   for (const s of SUITS) if (s !== trump) priority.push('K' + s);
   priority.push('Q' + trump);
+  
   const rest = [...avail].sort((a, b) => rankValue(b) - rankValue(a) || pointsOf(b) - pointsOf(a));
   const cards = [];
-  for (const c of priority.concat(rest)) {
-    if (avail.has(c) && !cards.includes(c)) cards.push(c);
+  
+  // First try to fulfill from priority based on baseCard
+  for (const base of priority) {
+    const matches = [...avail].filter(c => baseCard(c) === base);
+    for (const match of matches) {
+      if (!cards.includes(match)) cards.push(match);
+      if (cards.length === round.partnerCount) break;
+    }
     if (cards.length === round.partnerCount) break;
   }
-  return { type: 'declare', trump, cards };
+  
+  // Then fill with rest
+  for (const c of rest) {
+    if (cards.length === round.partnerCount) break;
+    if (avail.has(c) && !cards.includes(c)) cards.push(c);
+  }
+  
+  const formattedCards = [];
+  const counts = {};
+  for (const c of cards) {
+    const base = baseCard(c);
+    if (counts[base] === undefined) {
+      counts[base] = hand.filter(x => baseCard(x) === base).length;
+    }
+    counts[base]++;
+    formattedCards.push(`${base}_${counts[base]}`);
+  }
+  
+  return { type: 'declare', trump, cards: formattedCards };
 }
 
 /** What a player can legitimately deduce about teams. */

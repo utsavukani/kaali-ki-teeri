@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Mukta:wght@400;500;600;700;800&family=Rozha+One&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/styles.css?v=7">
 </head>
 <body>
   <!-- HOME -->
@@ -81,8 +81,7 @@
           <div class="settings" id="settings">
             <label>Opening bid (minimum)
               <select data-key="minBid">
-                <option>100</option><option>110</option><option>120</option><option>125</option><option>130</option>
-                <option>140</option><option>150</option><option>160</option><option>175</option><option>200</option>
+                <option value="auto">Auto</option>
               </select>
             </label>
             <label>Raise bids by
@@ -91,6 +90,16 @@
             <label>Partner cards called
               <select data-key="partnerCount">
                 <option value="auto">Auto</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
+              </select>
+            </label>
+            <label id="cpp-label">Cards per player <span id="cpp-note" class="muted small"></span>
+              <select data-key="cardsPerPlayer" id="cpp-sel">
+                <option value="auto">Auto</option>
+              </select>
+            </label>
+            <label>Team split <span id="team-split-note" class="muted small"></span>
+              <select data-key="teamSplit" id="team-split-sel">
+                <option value="auto" id="team-split-auto">Auto</option>
               </select>
             </label>
             <label>Bidder wins or loses
@@ -201,6 +210,6 @@
   <div id="conn" class="conn hidden" role="status">Connection lost. Reconnecting…</div>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/app.js"></script>
+  <script src="/app.js?v=4"></script>
 </body>
 </html>

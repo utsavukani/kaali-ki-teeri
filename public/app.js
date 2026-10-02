@@ -13,8 +13,9 @@
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
-  const suitOf = (c) => c.slice(-1);
-  const rankOf = (c) => c.slice(0, -1);
+  const baseCard = (c) => String(c || '').replace(/#\d+$/, '');
+  const suitOf = (c) => baseCard(c).slice(-1);
+  const rankOf = (c) => baseCard(c).slice(0, -1);
   const isRed = (s) => s === 'H' || s === 'D';
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
   const safeColor = (c) => (/^#[0-9a-f]{6}$/i.test(c || '') ? c : '#a4aad0');
@@ -22,7 +23,7 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
   function pointsOf(c) {
-    if (c === '3S') return 30;
+    if (baseCard(c) === '3S') return 30;
     const r = rankOf(c);
     if (r === 'A' || r === 'K' || r === 'Q' || r === 'J' || r === '10') return 10;
     if (r === '5') return 5;
@@ -34,11 +35,13 @@
 
   function cardHTML(c) {
     const s = suitOf(c), r = rankOf(c);
+    const bc = baseCard(c);
     const cls = ['card', 's-' + s];
     if (isRed(s)) cls.push('red');
-    if (c === '3S') cls.push('teeri');
+    if (bc === '3S') cls.push('teeri');
+    if (S.st && S.st.round && s === S.st.round.trump) cls.push('is-trump');
     let center;
-    if (c === '3S') center = '<span class="pips3"><i>♠</i><i>♠</i><i>♠</i></span>';
+    if (bc === '3S') center = '<span class="pips3"><i>♠</i><i>♠</i><i>♠</i></span>';
     else if (r === 'J' || r === 'Q' || r === 'K') center = `<span class="face">${r}</span>`;
     else center = `<span class="pip">${SYM[s]}</span>`;
     const pts = pointsOf(c);
@@ -280,7 +283,7 @@
       Sound.play('turn'); vibrate(60);
       if (st.phase === 'bidding') S.bidAmount = r.bidding.minNext;
     }
-    if (st.phase === 'bidding' && myTurn) S.bidAmount = clamp(S.bidAmount || r.bidding.minNext, r.bidding.minNext, 250);
+    if (st.phase === 'bidding' && myTurn) S.bidAmount = clamp(S.bidAmount || r.bidding.minNext, r.bidding.minNext, r.totalPoints);
     // Calling modal for the bidder
     if (st.phase === 'calling' && myTurn && (!prev || prev.phase !== 'calling')) {
       S.callTrump = null; S.callCards = [];
@@ -338,19 +341,81 @@
       const key = sel.dataset.key;
       if (key === 'partnerCount') sel.options[0].textContent = `Auto (${st.partnerPreview})`;
       if (key === 'rounds') sel.options[0].textContent = `One deal each (${st.players.length})`;
+      if (key === 'teamSplit' || key === 'cardsPerPlayer') continue; // handled separately below
+      if (key === 'minBid') {
+        // Dynamically build minBid options scaled to current deck count
+        const tp = (st.deckInfo && st.deckInfo.numDecks ? st.deckInfo.numDecks : 1) * 250;
+        const autoVal = Math.ceil(tp / 2);
+        // Generate options: roughly 40% to 100% of totalPoints in steps of 5
+        const steps = [];
+        for (let pct = 40; pct <= 100; pct += 5) {
+          const v = Math.round(tp * pct / 100 / 5) * 5;
+          if (v >= 100 && !steps.includes(v)) steps.push(v);
+        }
+        sel.innerHTML = `<option value="auto">Auto (${autoVal})</option>` +
+          steps.map((v) => `<option value="${v}">${v}</option>`).join('');
+        sel.value = String(st.settings.minBid || 'auto');
+        sel.disabled = !host;
+        continue;
+      }
       sel.value = String(st.settings[key]);
       sel.disabled = !host;
     }
     $('#settings-note').textContent = host ? 'You are the host. Changes apply for everyone.' : `Only ${nameOf(st.hostId)} (host) can change these.`;
     const n = st.players.length;
+    const di = st.deckInfo || {};
     const startBtn = $('#start-btn');
     startBtn.classList.toggle('hidden', !host);
     startBtn.disabled = n < 4;
+
+    // Update cards-per-player dropdown (only meaningful for 9 players)
+    const cppSel = $('#cpp-sel');
+    const cppLabel = $('#cpp-label');
+    if (cppSel && cppLabel) {
+      const cppOpts = di.cppOptions || null;
+      if (!cppOpts || cppOpts.length <= 1) {
+        cppLabel.style.display = 'none';
+      } else {
+        cppSel.innerHTML = '<option value="auto">Auto</option>' +
+          cppOpts.map((v) => `<option value="${v}">${v} cards each</option>`).join('');
+        cppSel.value = String(st.settings.cardsPerPlayer || 'auto');
+        cppSel.disabled = !host;
+        cppLabel.style.display = '';
+        const note = $('#cpp-note');
+        if (note) note.textContent = `(${n} players)`;
+      }
+    }
+
+    // Update team-split dropdown dynamically
+    const tsOpts = di.teamOptions || null;
+    const tsSel = $('#team-split-sel');
+    const tsLabel = tsSel && tsSel.closest('label');
+    if (tsSel) {
+      if (!tsOpts || tsOpts.length <= 1) {
+        // No meaningful choice: hide or just show Auto
+        tsSel.innerHTML = '<option value="auto">Auto</option>';
+        if (tsLabel) tsLabel.style.display = 'none';
+      } else {
+        // Multiple options: show them
+        tsSel.innerHTML = '<option value="auto">Auto</option>' +
+          tsOpts.map(([b, d]) => `<option value="${b}v${d}">${b} vs ${d}</option>`).join('');
+        tsSel.value = st.settings.teamSplit || 'auto';
+        tsSel.disabled = !host;
+        if (tsLabel) tsLabel.style.display = '';
+        const note = $('#team-split-note');
+        if (note) note.textContent = `(${n} players)`;
+      }
+    }
+
     let hint;
     if (!host) hint = `Waiting for ${esc(nameOf(st.hostId))} to deal`;
     else if (n < 4) hint = `Need ${4 - n} more to start. Invite friends or add bots.`;
-    else if (n < 6) hint = `${n} players ready. The game is best with 6 to 10.`;
-    else hint = `${n} players ready`;
+    else {
+      const deckTxt = di.numDecks > 1 ? `${di.numDecks} decks · ` : '';
+      const cardsTxt = di.cardsPerPlayer ? `${di.cardsPerPlayer} cards each` : '';
+      if (n < 6) hint = `${n} players ready. ${deckTxt}${cardsTxt}. Best with 6 to 10.`;
+      else hint = `${n} players ready. ${deckTxt}${cardsTxt}.`;
+    }
     $('#start-hint').innerHTML = hint;
   }
 
@@ -358,7 +423,10 @@
     const sel = e.target.closest('select[data-key]');
     if (!sel) return;
     let v = sel.value;
-    if (v === 'true') v = true; else if (v === 'false') v = false; else if (v !== 'auto') v = Number(v);
+    if (v === 'true') v = true;
+    else if (v === 'false') v = false;
+    else if (v !== 'auto' && v !== '' && !isNaN(Number(v))) v = Number(v);
+    // string values like '4v3' (teamSplit) stay as strings
     act({ type: 'settings', settings: { [sel.dataset.key]: v } });
   });
   $('#lobby').addEventListener('click', (e) => {
@@ -388,12 +456,21 @@
         chips += `<span class="chip trump"><span class="k">Trump</span><span class="sym s-${r.trump} ${isRed(r.trump) ? 'red' : ''}">${SYM[r.trump]}</span>${SUIT_NAME[r.trump]}</span>`;
       }
       chips += `<span class="chip"><span class="k">Bid</span><b>${r.bidding.high}</b>${esc(nameOf(r.bidding.bidderId))}</span>`;
+      const ordStr = (n) => n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : n + 'th';
       for (const c of r.called) {
-        chips += `<span class="chip called ${c.revealed ? 'revealed' : ''}">${cardText(c.card)}${c.revealed ? `<span class="who">${esc(nameOf(c.holderId))}</span>` : '<span class="q">hidden</span>'}</span>`;
+        const base = String(c.card || '').replace(/#\\d+$/, '');
+        const totalInDeck = r.cardCounts ? r.cardCounts[base] : 1;
+        chips += `<span class="chip called ${c.revealed ? 'revealed' : ''}">${cardText(c.card)}${totalInDeck > 1 ? ` <span class="muted" style="margin: 0 -3px 0 3px">(${ordStr(c.targetOrdinal)})</span>` : ''}${c.revealed ? `<span class="who">${esc(nameOf(c.holderId))}</span>` : '<span class="q">hidden</span>'}</span>`;
       }
     } else if (r && st.phase === 'bidding') {
       chips += `<span class="chip"><span class="k">Dealer</span>${esc(nameOf(r.dealerId))}</span>`;
       chips += `<span class="chip"><span class="k">Partners</span>${r.partnerCount}</span>`;
+      if (r.numDecks && r.numDecks > 1) {
+        chips += `<span class="chip"><span class="k">Decks</span>${r.numDecks}</span>`;
+      }
+      if (r.teamSplit) {
+        chips += `<span class="chip"><span class="k">Teams</span>${r.teamSplit.bidTeam}v${r.teamSplit.defTeam}</span>`;
+      }
     }
     $('#tb-info').innerHTML = chips;
     $('#tb-info-m').innerHTML = chips;
@@ -571,9 +648,11 @@
       if (myTurn) {
         const min = r.bidding.minNext;
         const step = st.settings.bidStep;
-        const amt = clamp(S.bidAmount || min, min, 250);
+        const maxBid = r.totalPoints || 250;
+        const amt = clamp(S.bidAmount || min, min, maxBid);
         S.bidAmount = amt;
-        const quick = [min, 150, 175, 200, 225, 250].filter((v, i, a) => v >= min && v <= 250 && a.indexOf(v) === i && (v - min) % step === 0).slice(0, 4);
+        const qBase = maxBid / 250;
+        const quick = [min, 150 * qBase, 175 * qBase, 200 * qBase, 225 * qBase, maxBid].map(v => Math.round(v / step) * step).filter((v, i, a) => v >= min && v <= maxBid && a.indexOf(v) === i && (v - min) % step === 0).slice(0, 4);
         html = `<div class="bidbox">
           <div class="row-top"><span class="a-your">Your bid</span>${timer}<span class="a-text">${r.bidding.high ? `Highest is <b>${r.bidding.high}</b> by ${esc(nameOf(r.bidding.bidderId))}` : 'No bids yet'}</span></div>
           <button type="button" class="btn ghost" data-act="pass" ${r.bidding.canPass ? '' : 'disabled title="Everyone passed, you must open"'}>Pass</button>
@@ -581,7 +660,7 @@
             <div class="stepper">
               <button type="button" data-bid-step="-1" aria-label="Lower bid" ${amt <= min ? 'disabled' : ''}>−</button>
               <output aria-live="polite">${amt}</output>
-              <button type="button" data-bid-step="1" aria-label="Raise bid" ${amt >= 250 ? 'disabled' : ''}>+</button>
+              <button type="button" data-bid-step="1" aria-label="Raise bid" ${amt >= maxBid ? 'disabled' : ''}>+</button>
             </div>
             <div class="quick">${quick.map((v) => `<button type="button" data-bid-set="${v}" class="${v === amt ? 'on' : ''}">${v}</button>`).join('')}</div>
           </div>
@@ -637,6 +716,15 @@
         el.addEventListener('animationend', () => el.classList.remove('deal'), { once: true });
       }
       existing.delete(c);
+      
+      const cardEl = el.firstElementChild;
+      if (cardEl) {
+        if (r && r.trump && suitOf(c) === r.trump) {
+          cardEl.classList.add('is-trump');
+        } else {
+          cardEl.classList.remove('is-trump');
+        }
+      }
       el.classList.toggle('sel', S.selected === c);
       el.classList.toggle('playable', myTurn && valid.has(c));
       el.classList.toggle('dim', myTurn && !valid.has(c));
@@ -657,10 +745,30 @@
   function layoutHand() {
     const box = $('#hand');
     const cards = $$('.hc', box);
-    if (!cards.length) return;
-    const W = box.clientWidth - 8;
-    const cw = cards[0].getBoundingClientRect().width || 60;
+    if (!cards.length) {
+      box.style.removeProperty('--cw');
+      return;
+    }
+    // Prevent the box from forcing expansion by bounding to window width temporarily if needed
+    const W = Math.min(box.clientWidth, window.innerWidth) - 8;
+    
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const defaultCw = Math.min(96, Math.max(50, Math.min(vw * 0.135, vh * 0.125)));
+    
     const n = cards.length;
+    let cw = defaultCw;
+    // Allow up to 50% overlap maximum before shrinking cards
+    const maxOverlap = 0.5;
+    const minW = cw + (n - 1) * (cw * (1 - maxOverlap));
+    
+    if (minW > W) {
+      cw = Math.max(44, W / (1 + (n - 1) * (1 - maxOverlap)));
+      box.style.setProperty('--cw', cw.toFixed(1) + 'px');
+    } else {
+      box.style.removeProperty('--cw');
+    }
+    
     const gap = 4;
     const need = n * cw + (n - 1) * gap;
     const ml = need <= W ? gap : -((n * cw - W) / (n - 1));
@@ -696,7 +804,7 @@
     const r = st.round;
     const step = e.target.closest('[data-bid-step]');
     if (step) {
-      S.bidAmount = clamp((S.bidAmount || r.bidding.minNext) + Number(step.dataset.bidStep) * st.settings.bidStep, r.bidding.minNext, 250);
+      S.bidAmount = clamp((S.bidAmount || r.bidding.minNext) + Number(step.dataset.bidStep) * st.settings.bidStep, r.bidding.minNext, r.totalPoints || 250);
       return renderAction(st);
     }
     const set = e.target.closest('[data-bid-set]');
@@ -779,9 +887,12 @@
   function modalCalling(st) {
     const r = st.round;
     const k = r.partnerCount;
-    const chosen = S.callCards.filter((c) => (st.callable || []).includes(c));
-    S.callCards = chosen;
     const callable = new Set(st.callable || []);
+    const chosen = S.callCards.filter((c) => {
+      const base = c.split('_')[0];
+      return [...callable].some(x => baseCard(x) === base);
+    });
+    S.callCards = chosen;
     const hand = st.hand;
     const tp = SUITS.map((s) => {
       const cs = hand.filter((c) => suitOf(c) === s);
@@ -790,12 +901,41 @@
         <span class="tp-sym">${SYM[s]}</span><span class="tp-name">${SUIT_NAME[s]}</span><span class="tp-meta">${cs.length} card${cs.length === 1 ? '' : 's'}<br>${pts} pts</span></button>`;
     }).join('');
     const rows = SUITS.map((s) => {
-      const cards = RANKS_DESC.map((rk) => rk + s)
-        .filter((c) => callable.has(c) && (S.callShowAll || pointsOf(c) > 0 || chosen.includes(c)));
-      if (!cards.length) return '';
-      return `<div class="call-row"><span class="call-suit s-${s} ${isRed(s) ? 'red' : ''}">${SYM[s]}</span><div class="call-cards">${cards.map((c) => {
-        const on = chosen.includes(c);
-        return `<button type="button" class="mini ${on ? 'on' : ''}" data-call="${c}" aria-pressed="${on}" aria-label="${cardName(c)}" ${!on && chosen.length >= k ? 'disabled' : ''}>${cardHTML(c)}</button>`;
+      const bases = [];
+      for (const rk of RANKS_DESC) {
+        const base = rk + s;
+        if (st.round.cardCounts && st.round.cardCounts[base] > 0) {
+           bases.push(base);
+        } else if (!st.round.cardCounts && callable.has(base)) {
+           bases.push(base);
+        }
+      }
+      
+      const filtered = bases.filter((base) => S.callShowAll || pointsOf(base) > 0 || chosen.some(c => c.startsWith(base + '_')));
+      if (!filtered.length) return '';
+      
+      return `<div class="call-row"><span class="call-suit s-${s} ${isRed(s) ? 'red' : ''}">${SYM[s]}</span><div class="call-cards">${filtered.map((base) => {
+        const total = (st.round.cardCounts && st.round.cardCounts[base]) || 1;
+        const buttons = [];
+        for (let ord = 1; ord <= total; ord++) {
+           const id = `${base}_${ord}`;
+           const on = chosen.includes(id);
+           const ordBadge = ord === 1 ? '1st' : ord === 2 ? '2nd' : ord === 3 ? '3rd' : `${ord}th`;
+           const badge = total > 1 ? `<span class="copy-badge">${ordBadge}</span>` : '';
+           
+           // Disable if we already have k partners and this isn't on
+           let disabled = (!on && chosen.length >= k);
+           
+           // Also disable if calling this would exceed callable count (you can't call your own copies)
+           if (st.round.cardCounts) {
+             const callableCount = [...callable].filter(c => baseCard(c) === base).length;
+             const currentlyChosen = chosen.filter(c => c.startsWith(base + '_')).length;
+             if (!on && currentlyChosen >= callableCount) disabled = true;
+           }
+           
+           buttons.push(`<button type="button" class="mini ${on ? 'on' : ''}" data-call="${id}" aria-pressed="${on}" aria-label="${ordBadge} ${cardName(base)}" ${disabled ? 'disabled' : ''}>${cardHTML(base)}${badge}</button>`);
+        }
+        return buttons.join('');
       }).join('')}</div></div>`;
     }).join('');
     const ready = S.callTrump && chosen.length === k;
@@ -814,11 +954,12 @@
 
   function teamList(st, ids, res) {
     const calledBy = {};
-    for (const c of res.called) (calledBy[c.holderId] = calledBy[c.holderId] || []).push(c.card);
+    const ordStr = (n) => n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : n + 'th';
+    for (const c of res.called) (calledBy[c.holderId] = calledBy[c.holderId] || []).push(c);
     return ids
       .slice().sort((a, b) => (res.captured[b] || 0) - (res.captured[a] || 0))
       .map((id) => {
-        const role = id === res.bidderId ? 'bidder' : calledBy[id] ? `partner via ${calledBy[id].map(cardText).join(' ')}` : '';
+        const role = id === res.bidderId ? 'bidder' : calledBy[id] ? `partner via ${calledBy[id].map((c) => `${cardText(c.card)}${c.ordinal > 1 ? ` <span class="muted" style="margin: 0 -3px 0 3px">(${ordStr(c.ordinal)})</span>` : ''}`).join(' ')}` : '';
         return `<li><span>${esc(nameOf(id))}${id === st.you ? ' (you)' : ''} ${role ? `<span class="r">${role}</span>` : ''}</span><b>${res.captured[id] || 0}</b></li>`;
       }).join('');
   }

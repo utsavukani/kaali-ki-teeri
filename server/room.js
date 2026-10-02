@@ -6,6 +6,7 @@
 const G = require('./game');
 const { botAction } = require('./bot');
 
+
 const BOT_NAMES = ['Raju', 'Pinky', 'Chintu', 'Munna', 'Guddu', 'Tinku', 'Bablu', 'Sonu', 'Pappu', 'Dolly', 'Bunty', 'Rinku'];
 const COLORS = ['#f2a922', '#58b4ff', '#ff6f86', '#6fdc8c', '#b793ff', '#ff9f4a', '#3fd0c0', '#ff79d0', '#c3e35a', '#9aa8ff', '#ff8a6a', '#63d9ff'];
 const REACTIONS = ['🔥', '😂', '👏', '😮', '😡', '🙏', '🤝', '😎'];
@@ -550,6 +551,7 @@ class Room {
         handSize: r.handSize,
         n: r.n,
         partnerCount: r.partnerCount,
+        totalPoints: r.totalPoints,
         bidding: {
           high: r.bidding.high,
           bidderId,
@@ -558,7 +560,7 @@ class Room {
           canPass: r.phase === 'bidding' ? r.canPass(forId) : false,
         },
         trump: r.trump,
-        called: r.called.map((c) => ({ card: c.card, revealed: c.revealed, holderId: c.revealed ? c.holderId : null })),
+        called: r.called.map((c) => ({ card: c.baseCard, targetOrdinal: c.targetOrdinal, revealed: c.revealed, holderId: c.revealed ? c.holderId : null })),
         trick: r.trick ? {
           leaderId: r.trick.leaderId,
           plays: r.trick.plays,
@@ -568,6 +570,18 @@ class Room {
         } : null,
         lastTrick: r.lastTrick,
         trickNo: r.trickNo,
+        numDecks: r.numDecksUsed,
+        teamSplit: r.teamSplit,
+        cardCounts: (() => {
+          const counts = {};
+          if (r.dealt) {
+            for (const c of r.dealt) {
+              const b = G.baseCard(c);
+              counts[b] = (counts[b] || 0) + 1;
+            }
+          }
+          return counts;
+        })(),
         turnId: this.phase === 'round' ? r.turnId : null,
         deadline: this.deadline,
         knownTeamPoints: r.bidding.bidderId ? [...knownTeam].reduce((s, id) => s + (r.captured[id] || 0), 0) : 0,
@@ -588,8 +602,27 @@ class Room {
       hostId: this.hostId,
       phase: this.publicPhase(),
       settings: this.settings,
-      partnerPreview: G.resolvePartnerCount(this.settings.partnerCount, Math.max(G.MIN_PLAYERS, this.players.length)),
+      partnerPreview: G.resolvePartnerCount(this.settings.partnerCount, Math.max(G.MIN_PLAYERS, this.players.length), this.settings.teamSplit !== 'auto' ? this.settings.teamSplit : null),
       roundsPreview: this.settings.rounds === 'auto' ? this.players.length : this.settings.rounds,
+      minBidPreview: (() => {
+        if (this.settings.minBid !== 'auto') return this.settings.minBid;
+        const n = Math.max(G.MIN_PLAYERS, this.players.length);
+        const preferredCpp = this.settings.cardsPerPlayer !== 'auto' ? Number(this.settings.cardsPerPlayer) : undefined;
+        const cfg = G.getDeckConfig(n, preferredCpp);
+        return Math.ceil(G.TOTAL_POINTS * cfg.numDecks / 2);
+      })(),
+      deckInfo: (() => {
+        const n = Math.max(G.MIN_PLAYERS, this.players.length);
+        const preferredCpp = this.settings.cardsPerPlayer !== 'auto' ? Number(this.settings.cardsPerPlayer) : undefined;
+        const cfg = G.getDeckConfig(n, preferredCpp);
+        return {
+          numDecks: cfg.numDecks,
+          cardsPerPlayer: cfg.cardsPerPlayer,
+          teamOptions: cfg.teamOptions,
+          cppOptions: cfg.cppOptions,
+          teamSplit: this.settings.teamSplit,
+        };
+      })(),
       players,
       spectators: this.spectators.map((s) => ({ id: s.id, name: s.name, color: s.color, connected: s.connected })),
       round,

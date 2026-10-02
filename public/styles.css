@@ -143,6 +143,13 @@ svg .fill { fill: currentColor; stroke: none; }
 .four-color .cl.s-C { color: #4fd18a; }
 .four-color .cl.s-D { color: #6aaeff; }
 
+.card.is-trump {
+  background: #68c48a; /* An even darker, more solid green */
+}
+.card.teeri.is-trump {
+  background: radial-gradient(circle at 50% 40%, #1f3b29, #0a170e 70%);
+}
+
 /* ---------- screens ---------- */
 .screen { min-height: 100dvh; }
 
@@ -389,6 +396,7 @@ input:focus { border-color: var(--marigold); outline: none; }
   position: relative; z-index: 6;
   padding: 4px 6px calc(8px + var(--safe-b));
   background: linear-gradient(to top, rgba(8, 11, 28, .95) 60%, rgba(8, 11, 28, 0));
+  width: 100%; min-width: 0;
 }
 #action { min-height: 48px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 2px 4px 6px; flex-wrap: wrap; text-align: center; }
 .a-text { font-size: 14px; color: var(--muted); }
@@ -410,7 +418,7 @@ input:focus { border-color: var(--marigold); outline: none; }
 .quick button.on { background: var(--marigold-soft); border-color: var(--marigold); color: var(--marigold); }
 
 /* hand */
-#hand { display: flex; justify-content: center; align-items: flex-end; padding-top: calc(var(--cw) * .2); min-height: calc(var(--cw) * 1.62); --ml: -4px; }
+#hand { display: flex; justify-content: center; align-items: flex-end; padding-top: calc(var(--cw) * .2); min-height: calc(var(--cw) * 1.62); --ml: -4px; width: 100%; min-width: 0; }
 .hc { position: relative; flex: none; padding: 0; border: 0; background: none; border-radius: calc(var(--cw) * .1); transition: transform .16s ease, filter .16s; touch-action: manipulation; }
 .hc + .hc { margin-left: var(--ml); }
 .hc .card { --w: var(--cw); }
@@ -530,8 +538,9 @@ input:focus { border-color: var(--marigold); outline: none; }
 .four-color .call-suit.s-C { color: #4fd18a; }
 .four-color .call-suit.s-D { color: #6aaeff; }
 .call-cards { display: flex; flex-wrap: wrap; gap: 5px; }
-.mini { padding: 0; border: 0; background: none; border-radius: 6px; transition: transform .12s; }
+.mini { padding: 0; border: 0; background: none; border-radius: 6px; transition: transform .12s; position: relative; }
 .mini .card { --w: 38px; box-shadow: 0 2px 5px rgba(0, 0, 0, .35); }
+.copy-badge { position: absolute; top: -6px; right: -6px; background: var(--marigold); color: #1c1403; font-size: 11px; font-weight: 800; padding: 1px 5px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.4); z-index: 2; pointer-events: none; }
 .mini .card .br { display: none; }
 .mini.on { transform: translateY(-4px); }
 .mini.on .card { box-shadow: 0 0 0 3px var(--marigold), 0 6px 12px rgba(0, 0, 0, .4); }
